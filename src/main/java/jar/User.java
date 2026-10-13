@@ -18,12 +18,21 @@ public class User {
 
     private String password;
 
+    private String role = "USER";
+
     public User() {
     }
 
     public User(String email, String password) {
         this.email = email;
         this.password = password;
+        this.role = "USER";
+    }
+
+    public User(String email, String password, String role) {
+        this.email = email;
+        this.password = password;
+        this.role = role != null ? role : "USER";
     }
 
     public Long getId() {
@@ -44,5 +53,13 @@ public class User {
 
     public void setPassword(String password) {
         this.password = password;
+    }
+
+    public String getRole() {
+        return role;
+    }
+
+    public void setRole(String role) {
+        this.role = role;
     }
 }

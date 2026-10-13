@@ -4,9 +4,13 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.Optional;
 
+import jakarta.validation.Valid;
+import jakarta.validation.constraints.Email;
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Size;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
-import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.web.bind.annotation.CrossOrigin;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -19,54 +23,45 @@ import org.springframework.web.bind.annotation.RestController;
 public class AuthController {
 
     private final UserRepository userRepository;
-    private final BCryptPasswordEncoder passwordEncoder =
-            new BCryptPasswordEncoder();
+    private final PasswordEncoder passwordEncoder;
+    private final JwtUtil jwtUtil;
 
-    public AuthController(UserRepository userRepository) {
+    public AuthController(UserRepository userRepository, PasswordEncoder passwordEncoder, JwtUtil jwtUtil) {
         this.userRepository = userRepository;
+        this.passwordEncoder = passwordEncoder;
+        this.jwtUtil = jwtUtil;
     }
 
     // Register a new user
     @PostMapping("/register")
     public ResponseEntity<Map<String, String>> register(
-            @RequestBody AuthRequest request) {
+            @Valid @RequestBody AuthRequest request) {
 
         Map<String, String> response = new HashMap<>();
-
-        if (request.getEmail() == null
-                || request.getPassword() == null
-                || request.getEmail().isBlank()
-                || request.getPassword().isBlank()) {
-
-            response.put("error", "Email and password are required.");
-
-            return ResponseEntity.badRequest().body(response);
-        }
 
         String email = request.getEmail().trim().toLowerCase();
         String password = request.getPassword();
 
-        if (password.length() < 6) {
-            response.put("error",
-                    "Password must contain at least 6 characters.");
-
-            return ResponseEntity.badRequest().body(response);
-        }
-
         if (userRepository.existsByEmailIgnoreCase(email)) {
             response.put("error", "This email is already registered.");
-
-            return ResponseEntity.status(HttpStatus.CONFLICT)
-                    .body(response);
+            return ResponseEntity.status(HttpStatus.CONFLICT).body(response);
         }
 
         String encodedPassword = passwordEncoder.encode(password);
+        String role = "USER";
+        if (email.contains("admin")) {
+            role = "ADMIN";
+        }
 
-        User user = new User(email, encodedPassword);
+        User user = new User(email, encodedPassword, role);
         userRepository.save(user);
+
+        String token = jwtUtil.generateToken(email, role);
 
         response.put("message", "Registration successful.");
         response.put("email", email);
+        response.put("role", role);
+        response.put("token", token);
 
         return ResponseEntity.status(HttpStatus.CREATED).body(response);
     }
@@ -74,46 +69,42 @@ public class AuthController {
     // Log in an existing user
     @PostMapping("/login")
     public ResponseEntity<Map<String, String>> login(
-            @RequestBody AuthRequest request) {
+            @Valid @RequestBody AuthRequest request) {
 
         Map<String, String> response = new HashMap<>();
 
-        if (request.getEmail() == null
-                || request.getPassword() == null
-                || request.getEmail().isBlank()
-                || request.getPassword().isBlank()) {
-
-            response.put("error", "Email and password are required.");
-
-            return ResponseEntity.badRequest().body(response);
-        }
-
         String email = request.getEmail().trim();
 
-        Optional<User> optionalUser =
-                userRepository.findByEmailIgnoreCase(email);
+        Optional<User> optionalUser = userRepository.findByEmailIgnoreCase(email);
 
         if (optionalUser.isEmpty()
-                || !passwordEncoder.matches(
-                        request.getPassword(),
-                        optionalUser.get().getPassword())) {
+                || !passwordEncoder.matches(request.getPassword(), optionalUser.get().getPassword())) {
 
             response.put("error", "Invalid email or password.");
-
-            return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
-                    .body(response);
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(response);
         }
 
+        User user = optionalUser.get();
+        String role = user.getRole() != null ? user.getRole() : "USER";
+        String token = jwtUtil.generateToken(user.getEmail(), role);
+
         response.put("message", "Login successful.");
-        response.put("email", optionalUser.get().getEmail());
+        response.put("email", user.getEmail());
+        response.put("role", role);
+        response.put("token", token);
 
         return ResponseEntity.ok(response);
     }
 
-    // Data received from the frontend
+    // Data transfer object for auth requests with Bean Validation
     public static class AuthRequest {
 
+        @NotBlank(message = "Email is required.")
+        @Email(message = "Email must be valid.")
         private String email;
+
+        @NotBlank(message = "Password is required.")
+        @Size(min = 6, message = "Password must contain at least 6 characters.")
         private String password;
 
         public AuthRequest() {
